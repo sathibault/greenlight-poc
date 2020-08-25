@@ -1,0 +1,110 @@
+<html>
+<script src="output.js"></script>
+<script>
+var ctx = null;
+var video = null;
+var sxm = null;
+var imgbuf = null;
+var imgwidth=320;
+var imgheight=200;
+
+function start() {
+  video = document.createElement('video')
+
+  // If we don't do this, the stream will not be played.
+  video.setAttribute('autoplay', '1')
+  video.setAttribute('playsinline', '1') // important for iPhones
+  // The video should fill out all of the canvas
+  video.setAttribute('width', 1)
+  video.setAttribute('height', 1)
+
+  var container = document.createElement('div')
+  container.appendChild(video)
+  document.body.appendChild(container)
+
+  ctx = document.getElementsByTagName('canvas')[0].getContext('2d');
+
+  navigator.mediaDevices.getUserMedia({video: {width:320, height:200}, audio: false}).then(function(stream) {
+    video.srcObject = stream
+  }, function(err) {
+    throw err
+  });
+}
+
+var perfHist = [];
+function process() {
+  if (sxm._model_status() < 1) return;
+  var t0 = performance.now();
+  ctx.drawImage(video, 0, 0);
+  var rgba = ctx.getImageData(0, 0, imgwidth, imgheight).data;
+  //console.log(rgba);
+  if (sxm) {
+    var buf = sxm._malloc(28*4);
+    var eubuf = sxm._malloc(3*4);
+    sxm.HEAPU8.set(rgba, imgbuf);
+    var n = sxm._detect(imgwidth, imgheight, imgbuf);
+    //console.log(n);
+    for (var i = 0; i < n; i++) {
+      sxm._get_box(i, buf);
+      var out = new Int32Array(sxm.HEAP32.buffer, buf, 4);
+      //console.log(out);
+      ctx.beginPath();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'red';
+      ctx.moveTo(out[0],out[1]);
+      ctx.lineTo(out[2],out[1]);
+      ctx.lineTo(out[2],out[3]);
+      ctx.lineTo(out[0],out[3]);
+      ctx.lineTo(out[0],out[1]);
+      ctx.stroke();
+    }
+    if (n > 0) {
+      if (sxm._pose(imgwidth, imgheight, imgbuf, buf, eubuf) >= 0) {
+        var face = new Int32Array(sxm.HEAP32.buffer, buf, 28);
+        var euler = new Float32Array(sxm.HEAP32.buffer, eubuf, 3);
+        //console.log(face);
+        //console.log(euler);
+        ctx.beginPath();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'green';
+        ctx.moveTo(face[8],face[9]);
+        ctx.lineTo(face[14],face[15]);
+        ctx.lineTo(face[18],face[19]);
+        ctx.lineTo(face[16],face[17]);
+        ctx.lineTo(face[8],face[9]);
+        ctx.stroke();
+      }
+    }
+    sxm._free(eubuf);
+    sxm._free(buf);
+  }
+  var t1 = performance.now();
+  perfHist.push(t1-t0);
+  if (perfHist.length > 10)
+    perfHist.shift();
+  var ms = Math.round(perfHist.reduce((a,b) => a+b)/perfHist.length);
+  document.getElementById('stat').innerHTML = ms + ' ms';
+}
+
+function capture() {
+  process();
+}
+
+function runloop() {
+  process();
+  setTimeout(runloop, 0);
+}
+
+Module().then(m => {
+  sxm = m;
+  sxm._init_models();
+  imgbuf = sxm._malloc(imgwidth*imgheight*4);
+});
+</script>
+<body>
+<p><center><input type="button" value="Start" onclick="start()"></center></p>
+<p><center><input type="button" value="Capture" onclick="capture()"> <input type="button" value="Run" onclick="runloop()"></center></p>
+<p><center><canvas width=320 height=200></canvas></center></p>
+<div id="stat"></div>
+</body>
+</html>
